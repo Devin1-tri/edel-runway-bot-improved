@@ -1,0 +1,24 @@
+{
+  "name": "edel-runway-bot-improved",
+  "version": "3.0.0",
+  "description": "Auto daily vote bot for Edel Finance Runway Desk with Interactive Telegram Control (no SSH needed)",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "import": "node src/index.js import",
+    "vote": "node src/index.js vote",
+    "start": "node src/index.js start",
+    "status": "node src/index.js status"
+  },
+  "keywords": ["edel", "runway", "bot", "vote", "telegram-control"],
+  "license": "MIT",
+  "dependencies": {
+    "node-cron": "^3.0.3",
+    "dotenv": "^16.5.0",
+    "winston": "^3.17.0",
+    "chalk": "^5.4.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
