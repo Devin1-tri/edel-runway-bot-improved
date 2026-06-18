@@ -1,7 +1,7 @@
 import { validateConfig } from './utils/config.js';
 import config from './utils/config.js';
 import logger, { logSeparator } from './utils/logger.js';
-import { hasSession, getSessionAge, clearSession, importSession, importSessionFromFile } from './auth/session.js';
+import { hasSession, getSessionAge, getSessionExpiry, getSessionTimeRemaining, clearSession, importSession, importSessionFromFile } from './auth/session.js';
 import { checkSession } from './api/client.js';
 import { startScheduler, runSingleVote } from './scheduler/cron.js';
 
@@ -74,6 +74,8 @@ async function showStatus() {
   if (hasSession()) {
     const age = getSessionAge();
     const ageStr = age !== null ? `${age.toFixed(1)} jam` : 'unknown';
+    const expiry = getSessionExpiry();
+    const remaining = getSessionTimeRemaining();
 
     // Test if session is actually valid
     logger.info('🔍 Mengetes session ke API Edel Finance...');
@@ -81,8 +83,17 @@ async function showStatus() {
 
     if (valid) {
       logger.info(`✅ Session: VALID (umur: ${ageStr})`);
+      if (expiry) {
+        logger.info(`   🔐 JWT berakhir: ${expiry.toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })}`);
+      }
+      if (remaining && !remaining.expired) {
+        logger.info(`   ⏰ Sisa waktu: ${remaining.hours} jam ${remaining.minutes} menit`);
+      }
     } else {
       logger.warn(`⚠️  Session: EXPIRED / INVALID (umur: ${ageStr})`);
+      if (remaining && remaining.expired) {
+        logger.warn(`   🔑 JWT sudah expired!`);
+      }
       logger.info('   Silakan jalankan "npm run start" dan kirim cookie baru via Telegram.');
     }
   } else {

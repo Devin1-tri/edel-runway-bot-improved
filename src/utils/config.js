@@ -45,6 +45,10 @@ const config = {
   screenshotDir: path.join(ROOT, 'screenshots'),
   logDir: path.join(ROOT, 'logs'),
   sessionFile: path.join(ROOT, 'sessions', 'state.json'),
+
+  // Session Keep-Alive
+  keepaliveEnabled: process.env.KEEPALIVE_ENABLED !== 'false',
+  keepaliveIntervalMinutes: parseInt(process.env.KEEPALIVE_INTERVAL_MINUTES || '30', 10),
 };
 
 /**

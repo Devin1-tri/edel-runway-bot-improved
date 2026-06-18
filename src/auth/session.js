@@ -63,6 +63,77 @@ export function hasSession() {
   return fs.existsSync(config.sessionFile);
 }
 
+// ─────────────────────────────────────────────
+//  JWT Expiry Decoder
+// ─────────────────────────────────────────────
+
+/**
+ * Decode the edel_session JWT token and extract the payload.
+ * The JWT may not be fully standard — we decode carefully.
+ * @returns {object|null} Decoded payload or null
+ */
+function decodeJwtPayload() {
+  const session = loadSession();
+  if (!session || !session.cookies) return null;
+
+  const edelCookie = session.cookies.find((c) => c.name === 'edel_session');
+  if (!edelCookie || !edelCookie.value) return null;
+
+  const token = edelCookie.value;
+  const parts = token.split('.');
+  if (parts.length < 2) return null;
+
+  try {
+    // Base64url decode the payload (second segment)
+    let payload = parts[1];
+    // Convert base64url to standard base64
+    payload = payload.replace(/-/g, '+').replace(/_/g, '/');
+    // Pad to multiple of 4
+    while (payload.length % 4 !== 0) {
+      payload += '=';
+    }
+    const decoded = Buffer.from(payload, 'base64').toString('utf-8');
+    return JSON.parse(decoded);
+  } catch (err) {
+    logger.debug(`Failed to decode JWT payload: ${err.message}`);
+    return null;
+  }
+}
+
+/**
+ * Get the session expiry date from the JWT `exp` claim.
+ * @returns {Date|null} Expiry date or null if unavailable
+ */
+export function getSessionExpiry() {
+  const payload = decodeJwtPayload();
+  if (!payload || !payload.exp) return null;
+
+  // exp is in seconds (Unix timestamp)
+  const expiryMs = typeof payload.exp === 'number' && payload.exp < 1e12
+    ? payload.exp * 1000
+    : payload.exp;
+
+  return new Date(expiryMs);
+}
+
+/**
+ * Get the time remaining until session expiry.
+ * @returns {{ hours: number, minutes: number, totalMinutes: number, expired: boolean } | null}
+ */
+export function getSessionTimeRemaining() {
+  const expiry = getSessionExpiry();
+  if (!expiry) return null;
+
+  const now = Date.now();
+  const diffMs = expiry.getTime() - now;
+  const totalMinutes = Math.floor(diffMs / 60000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  const expired = diffMs <= 0;
+
+  return { hours, minutes, totalMinutes, expired };
+}
+
 /**
  * Delete saved session
  */
@@ -84,9 +155,17 @@ export function getSessionAge() {
 }
 
 /**
- * Check if session might be expired (older than 48 hours)
+ * Check if session might be expired.
+ * Uses JWT exp claim if available, otherwise falls back to file age.
  */
 export function isSessionLikelyExpired() {
+  // Try JWT expiry first
+  const remaining = getSessionTimeRemaining();
+  if (remaining !== null) {
+    return remaining.expired;
+  }
+
+  // Fallback: file age heuristic
   const age = getSessionAge();
   if (age === null) return true;
   return age > 48;

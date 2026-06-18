@@ -1,8 +1,8 @@
-# 🤖 Edel Runway Desk - Auto Vote Bot (Improved v3.0)
+# 🤖 Edel Runway Desk - Auto Vote Bot (Improved v3.1)
 
-Bot otomatis untuk daily vote pada **Listing Calls** di [Edel Finance Runway Desk](https://runway.edel.finance/listing-calls) dengan fitur **Interactive Telegram Control**.
+Bot otomatis untuk daily vote pada **Listing Calls** di [Edel Finance Runway Desk](https://runway.edel.finance/listing-calls) dengan fitur **Interactive Telegram Control** dan **Session Awareness**.
 
-## ✨ Perbaikan & Fitur Unggulan (v3.0)
+## ✨ Perbaikan & Fitur Unggulan (v3.1)
 
 Dibandingkan dengan repository aslinya yang merepotkan ketika cookie expired, versi clone yang sudah ditingkatkan ini memiliki fitur:
 
@@ -15,7 +15,19 @@ Dibandingkan dengan repository aslinya yang merepotkan ketika cookie expired, ve
    * Kirim `/help` untuk menampilkan panduan lengkap.
 3. **🔑 Smart Token Wrapper**
    * Kamu tidak harus meng-copy semua header Cookie yang panjang. Cukup copy string token JWT-nya saja (yang dimulai dengan `eyJ...`), kirim ke Telegram, dan bot akan membungkusnya secara otomatis ke struktur cookie format Playwright.
-4. **📦 PM2 & Docker Ready**
+4. **💓 Session Keep-Alive (NEW in v3.1!)**
+   * Bot secara otomatis melakukan ping ke Edel Finance API setiap 30 menit (dapat dikonfigurasi) untuk mencegah session timeout karena idle.
+   * Jika session sudah expired, bot akan mendeteksi dan mengirim notifikasi ke Telegram.
+5. **🔐 JWT Expiry Detection (NEW in v3.1!)**
+   * Bot mendekode token JWT `edel_session` dan membaca klaim `exp` untuk mengetahui kapan session akan berakhir.
+   * Perintah `/status` sekarang menampilkan waktu kedaluwarsa dan sisa waktu session.
+   * `isSessionLikelyExpired()` menggunakan data JWT (bukan hanya umur file) untuk akurasi yang lebih baik.
+6. **⚠️ Proactive Expiry Warning (NEW in v3.1!)**
+   * Bot mengirim peringatan otomatis sebelum session kedaluwarsa:
+     * **< 2 jam tersisa:** Peringatan biasa
+     * **< 30 menit tersisa:** Peringatan mendesak setiap 5 menit
+   * Dengan ini kamu punya waktu untuk memperbarui cookie sebelum bot berhenti berfungsi.
+7. **📦 PM2 & Docker Ready**
    * Dilengkapi `ecosystem.config.cjs` untuk deploy mudah di VPS menggunakan PM2 agar bot auto-restart jika VPS reboot atau crash.
 
 ---
@@ -49,6 +61,10 @@ nano .env
 Pastikan kamu mengisi bagian Telegram:
 * `TELEGRAM_BOT_TOKEN`: Token bot dari `@BotFather`.
 * `TELEGRAM_CHAT_ID`: ID chat kamu (bisa dicari via `https://api.telegram.org/bot<TOKEN>/getUpdates`).
+
+Konfigurasi opsional untuk Session Keep-Alive:
+* `KEEPALIVE_ENABLED`: Aktifkan keep-alive (default: `true`).
+* `KEEPALIVE_INTERVAL_MINUTES`: Interval ping dalam menit (default: `30`).
 
 ### 3. Jalankan Bot
 
@@ -99,7 +115,7 @@ Saat bot mengirim pesan **🔑 SESSION EXPIRED** di Telegram:
 
 Kirim perintah ini langsung di dalam chat bot Telegram kamu:
 
-* `/status` — Untuk mengecek apakah session masih valid dan bot berjalan dengan baik.
+* `/status` — Untuk mengecek apakah session masih valid, waktu kedaluwarsa JWT, dan sisa waktu session.
 * `/vote` — Memaksa bot melakukan voting saat ini juga (jika jendela voting terbuka).
 * `/help` — Menampilkan bantuan instruksi bot.
 
@@ -116,6 +132,37 @@ Kirim perintah ini langsung di dalam chat bot Telegram kamu:
 | `MAX_RETRIES` | `3` | Maksimal percobaan ulang jika gagal |
 | `TELEGRAM_BOT_TOKEN` | *(kosong)* | Token bot dari @BotFather |
 | `TELEGRAM_CHAT_ID` | *(kosong)* | ID chat kamu untuk notifikasi & interaksi kontrol |
+| `KEEPALIVE_ENABLED` | `true` | Aktifkan session keep-alive (ping API secara berkala) |
+| `KEEPALIVE_INTERVAL_MINUTES` | `30` | Interval keep-alive dalam menit |
+
+---
+
+## 🧠 Cara Kerja Session Awareness
+
+### JWT Expiry Detection
+
+Token `edel_session` adalah JWT (JSON Web Token) yang berisi klaim `exp` (expiry timestamp). Bot mendekode payload JWT secara lokal menggunakan base64url decoding, tanpa perlu library eksternal. Ini memungkinkan bot untuk:
+
+* Mengetahui **kapan persisnya** session akan berakhir
+* Menghitung **sisa waktu** hingga kedaluwarsa
+* Memberikan peringatan **sebelum** session benar-benar habis
+
+### Session Keep-Alive
+
+Beberapa server mengakhiri session jika tidak ada aktivitas dalam jangka waktu tertentu. Bot ini mengirim request ringan (`GET /assets`) secara berkala untuk menjaga session tetap aktif. Jika response menunjukkan session expired (HTTP 401/403), bot akan:
+
+1. Mengirim notifikasi ke Telegram
+2. Menunggu kamu mengirim cookie baru
+3. Otomatis melanjutkan voting setelah session diperbarui
+
+### Proactive Warnings
+
+Sebelum setiap siklus voting, bot memeriksa sisa waktu JWT. Berdasarkan sisa waktu, bot akan:
+
+* **> 2 jam:** Tidak ada peringatan (aman)
+* **< 2 jam:** Kirim peringatan biasa ke Telegram
+* **< 30 menit:** Kirim peringatan mendesak setiap 5 menit
+* **Expired:** Kirim notifikasi expired dan skip voting
 
 ---
 

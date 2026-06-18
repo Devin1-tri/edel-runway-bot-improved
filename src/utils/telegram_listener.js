@@ -2,6 +2,7 @@ import config from './config.js';
 import logger from './logger.js';
 import { saveSessionRaw } from '../auth/session.js';
 import { checkSession } from '../api/client.js';
+import { getSessionExpiry, getSessionTimeRemaining } from '../auth/session.js';
 
 let pollingActive = false;
 let lastUpdateId = 0;
@@ -82,11 +83,25 @@ async function handleTelegramUpdate(update, onEvent) {
   // Status check
   if (text === '/status') {
     const valid = await checkSession();
+    const expiry = getSessionExpiry();
+    const remaining = getSessionTimeRemaining();
+
+    let statusMsg;
     if (valid) {
-      await sendReply(chatId, "✅ *STATUS SESSION: VALID*\n\nBot berjalan lancar dan siap untuk vote berikutnya!");
+      statusMsg = `✅ *STATUS SESSION: VALID*\n\nBot berjalan lancar dan siap untuk vote berikutnya!`;
+      if (expiry) {
+        statusMsg += `\n\n🔐 Berakhir: ${expiry.toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })}`;
+      }
+      if (remaining && !remaining.expired) {
+        statusMsg += `\n⏰ Sisa: *${remaining.hours} jam ${remaining.minutes} menit*`;
+      }
     } else {
-      await sendReply(chatId, "⚠️ *STATUS SESSION: EXPIRED / BELUM SETUP*\n\nSilakan kirim cookie baru ke chat ini untuk memperbarui!");
+      statusMsg = `⚠️ *STATUS SESSION: EXPIRED / BELUM SETUP*\n\nSilakan kirim cookie baru ke chat ini untuk memperbarui!`;
+      if (remaining && remaining.expired) {
+        statusMsg += `\n\n🔑 JWT sudah expired!`;
+      }
     }
+    await sendReply(chatId, statusMsg);
     return;
   }
 

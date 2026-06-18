@@ -11,9 +11,60 @@ import {
   sendTelegram,
 } from '../utils/telegram.js';
 import { startTelegramListener, stopTelegramListener } from '../utils/telegram_listener.js';
+import { startKeepalive, stopKeepalive } from '../auth/keepalive.js';
+import { getSessionTimeRemaining } from '../auth/session.js';
 
 // Track active timer for graceful shutdown
 let nextVoteTimer = null;
+let lastUrgentWarningTime = 0;
+
+/**
+ * Check JWT expiry and send proactive warnings before vote cycle.
+ * Returns true if session is expired (caller should skip the vote).
+ */
+async function checkSessionExpiryWarnings() {
+  const remaining = getSessionTimeRemaining();
+  if (!remaining) {
+    // No JWT exp claim available — can't check, proceed normally
+    return false;
+  }
+
+  if (remaining.expired) {
+    logger.warn('🔑 JWT session sudah EXPIRED!');
+    await notifySessionExpired();
+    return true;
+  }
+
+  // Urgent: < 30 minutes remaining — warn every 5 minutes
+  if (remaining.totalMinutes < 30) {
+    const now = Date.now();
+    const fiveMinutesMs = 5 * 60 * 1000;
+    if (now - lastUrgentWarningTime >= fiveMinutesMs) {
+      lastUrgentWarningTime = now;
+      logger.warn(`🚨 Session tinggal ${remaining.minutes} menit!`);
+      await sendTelegram(
+        `🚨 *SESSION HAMPIR HABIS!*\n\n` +
+        `⏰ Sisa: *${remaining.minutes} menit*\n` +
+        `🔑 Segera kirim cookie baru ke chat ini!\n\n` +
+        `Bot akan berhenti vote jika session habis.`
+      );
+    }
+    return false; // Still valid, allow vote attempt
+  }
+
+  // Warning: < 2 hours remaining
+  if (remaining.totalMinutes < 120) {
+    logger.warn(`⚠️ Session tinggal ${remaining.hours}j ${remaining.minutes}m`);
+    await sendTelegram(
+      `⚠️ *Session Expiry Warning*\n\n` +
+      `🕐 Session berakhir dalam *${remaining.hours} jam ${remaining.minutes} menit*\n` +
+      `📌 Kirim cookie baru sebelum expired agar bot tetap jalan.`
+    );
+    return false; // Still valid, allow vote attempt
+  }
+
+  return false;
+}
 
 /**
  * Execute a single vote cycle with retry logic.
@@ -26,6 +77,13 @@ let nextVoteTimer = null;
 async function voteCycle() {
   logSeparator();
   logger.info(`⏰ Vote cycle dimulai pada ${new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })}`);
+
+  // Proactive JWT expiry check before voting
+  const sessionExpired = await checkSessionExpiryWarnings();
+  if (sessionExpired) {
+    logger.error('🔑 Session expired (JWT check). Skipping vote cycle.');
+    return 'failed';
+  }
 
   let lastError = null;
 
@@ -167,15 +225,15 @@ async function triggerImmediateVote(reason) {
 export async function startScheduler() {
   console.log('');
   console.log('\x1b[36m' +
-  ` ██████╗  █████╗ ████████╗ ██████╗ ██╗  ██╗██████╗ ██████╗  ██████╗ ███╗   ██╗        ██╗  ██╗ ██████╗ █████╗ 
- ██╔══██╗██╔══██╗╚══██╔══╝██╔═══██╗██║ ██╔╝██╔══██╗██╔══██╗██╔════╝ ████╗  ██║        ██║  ██║██╔════╝██╔══██╗
- ██████╔╝███████║   ██║   ██║   ██║█████╔╝ ██║  ██║██████╔╝██║  ███╗██╔██╗ ██║        ███████║██║     ███████║
- ██╔══██╗██╔══██║   ██║   ██║   ██║██╔═██╗ ██║  ██║██╔══██╗██║   ██║██║╚██╗██║        ██╔══██║██║     ██╔══██║
- ██████╔╝██║  ██║   ██║   ╚██████╔╝██║  ██╗██████╔╝██║  ██║╚██████╔╝██║ ╚████║        ██║  ██║╚██████╗██║  ██║
- ╚═════╝ ╚═╝  ╚═╝   ╚═╝    ╚═════╝ ╚═╝  ╚═╝╚═════╝ ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝        ╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝` + '\x1b[0m');
+  ` ██████╗  █████╗ ████████╗ ██████╗ ██╗  ██╗██████╗ ██████╗  ██████╗ ███╗   ██╗        ██╗  ██╗ ██████╗ █████╗ \n` +
+  ` ██╔══██╗██╔══██╗╚══██╔══╝██╔═══██╗██║ ██╔╝██╔══██╗██╔══██╗██╔════╝ ████╗  ██║        ██║  ██║██╔════╝██╔══██╗\n` +
+  ` ██████╔╝███████║   ██║   ██║   ██║█████╔╝ ██║  ██║██████╔╝██║  ███╗██╔██╗ ██║        ███████║██║     ███████║\n` +
+  ` ██╔══██╗██╔══██║   ██║   ██║   ██║██╔═██╗ ██║  ██║██╔══██╗██║   ██║██║╚██╗██║        ██╔══██║██║     ██╔══██║\n` +
+  ` ██████╔╝██║  ██║   ██║   ╚██████╔╝██║  ██╗██████╔╝██║  ██║╚██████╔╝██║ ╚████║        ██║  ██║╚██████╗██║  ██║\n` +
+  ` ╚═════╝ ╚═╝  ╚═╝   ╚═╝    ╚═════╝ ╚═╝  ╚═╝╚═════╝ ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝        ╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝` + '\x1b[0m');
   console.log('');
   console.log('\x1b[90m  ──────────────────────────────────────────────────────────────────────────────────\x1b[0m');
-  console.log('\x1b[33m   ⚡ Edel Runway Desk — Auto Vote Bot v3.0 (Improved)\x1b[0m');
+  console.log('\x1b[33m   ⚡ Edel Runway Desk — Auto Vote Bot v3.1 (Session-Aware)\x1b[0m');
   console.log('\x1b[90m   🌐 Pure HTTP Mode — Interactive Telegram Control\x1b[0m');
   console.log('\x1b[90m  ──────────────────────────────────────────────────────────────────────────────────\x1b[0m');
   console.log('');
@@ -184,6 +242,7 @@ export async function startScheduler() {
   logger.info(`🎯 Strategy : ${config.voteStrategy}`);
   logger.info(`🔁 Retries  : ${config.maxRetries} per siklus`);
   logger.info(`📨 Telegram : ${config.telegramBotToken ? 'Terbuka (Interactive) ✅' : 'Belum diset ⚠️'}`);
+  logger.info(`💓 KeepAlive: ${config.keepaliveEnabled ? `ON (setiap ${config.keepaliveIntervalMinutes} mnt)` : 'OFF'}`);
   logger.info('');
 
   // Send Telegram notification that bot started
@@ -197,6 +256,9 @@ export async function startScheduler() {
       }
     });
   }
+
+  // Start session keep-alive
+  await startKeepalive();
 
   logger.info('▶️  Menjalankan siklus vote awal...');
   const result = await voteCycle();
@@ -214,6 +276,9 @@ export async function startScheduler() {
     logger.info('');
     logger.info('🛑 Bot dihentikan...');
     
+    // Stop keep-alive
+    stopKeepalive();
+
     // Stop Telegram listener
     stopTelegramListener();
 
