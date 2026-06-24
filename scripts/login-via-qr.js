@@ -1,16 +1,26 @@
 #!/usr/bin/env node
 /**
- * ⚡ Edel Bot — QR Passkey Login via VPS
+ * 📱 Edel Bot — Login via VNC + QR Passkey
  *
- * Buka Playwright browser di VPS (Xvfb display), masuk ke login page.
- * Lo tinggal masukin email → QR passkey muncul.
- * Lo scan dari HP → cookie & profile auto tersimpan.
+ * 🔥 CARA PAKAI:
  *
- * USAGE:
+ * Step 1 — Di TERMINAL 1 (VPS):
  *   node scripts/login-via-qr.js
+ *   → Masukin email
+ *   → Browser nyala di Xvfb
+ *   → Klik "Sign In With Passkey" → "Entering Desk"
+ *   → Muncul QR code passkey
  *
- * Requires Xvfb to be running (Xvfb :99 -screen 0 1920x1080x24 &)
- * Or set HEADLESS=true to use screenshot-only mode
+ * Step 2 — Di VNC CLIENT (HP/PC lo):
+ *   Buka VNC client → connect ke IP_VPS:5900
+ *   Password: edelbot
+ *   → Liat QR code di Chrome → SCAN PAKE HP
+ *
+ * Step 3 — Selesai! Cookie auto tersimpan.
+ *
+ * REQUIREMENTS:
+ *   apt install x11vnc   (udah diinstall)
+ *   Xvfb running on :99  (udah jalan)
  */
 
 import { chromium } from 'playwright';
@@ -18,171 +28,167 @@ import path from 'path';
 import fs from 'fs';
 import readline from 'readline';
 import { fileURLToPath } from 'url';
-import { execSync } from 'child_process';
+import { execSync, spawn } from 'child_process';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 const PROFILE_DIR = path.join(ROOT, 'profiles', 'edel-profile');
-
-// Check if DISPLAY is available
-function checkDisplay() {
-  try {
-    const out = execSync('xdpyinfo -display :99 2>/dev/null | head -1', { timeout: 3 });
-    return out.toString().includes('name');
-  } catch {
-    return false;
-  }
-}
+const SCREENSHOT_DIR = path.join(ROOT, 'screenshots');
+const VNC_PASS = 'edelbot';
+const VNC_PORT = 5900;
 
 function ask(query) {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  return new Promise(resolve => rl.question(query, ans => { rl.close(); resolve(ans); }));
+  return new Promise(resolve => rl.question(query, ans => { rl.close(); resolve(ans.trim()); }));
+}
+
+function ensureDisplay() {
+  // Check Xvfb
+  try {
+    execSync('xdpyinfo -display :99 2>/dev/null', { timeout: 3 });
+    return true;
+  } catch {
+    try {
+      spawn('Xvfb', [':99', '-screen', '0', '1920x1080x24', '-ac'], {
+        detached: true, stdio: 'ignore',
+      }).unref();
+      return true;
+    } catch { return false; }
+  }
+}
+
+function startVNC() {
+  try {
+    // Kill existing x11vnc
+    execSync('pkill -f "x11vnc.*:99" 2>/dev/null', { timeout: 2 });
+    
+    // Start new
+    const proc = spawn('x11vnc', [
+      '-display', ':99',
+      '-forever',
+      '-shared',
+      '-rfbport', String(VNC_PORT),
+      '-passwd', VNC_PASS,
+      '-bg',
+    ], { stdio: 'ignore', detached: true });
+    proc.unref();
+    return true;
+  } catch { return false; }
+}
+
+function getIP() {
+  try {
+    const ip = execSync('curl -s ifconfig.me', { timeout: 5 }).toString().trim();
+    return ip;
+  } catch {
+    // Try local IP
+    try {
+      const ip = execSync('ip route get 1 | awk \'{print $7;exit}\'', { timeout: 3 }).toString().trim();
+      return ip || 'VPS_IP';
+    } catch { return 'VPS_IP'; }
+  }
 }
 
 async function main() {
   console.log('');
   console.log('╔══════════════════════════════════════════════════════════╗');
-  console.log('║   📱 Edel Bot — QR Passkey Login via VPS              ║');
+  console.log('║   📱 Edel Bot — Login via VNC + QR Passkey           ║');
   console.log('╚══════════════════════════════════════════════════════════╝');
   console.log('');
 
-  // Check display
-  const hasDisplay = checkDisplay();
-  console.log(`🖥️  Display :99: ${hasDisplay ? 'AVAILABLE ✅' : 'NOT FOUND ❌'}`);
-
-  if (!hasDisplay) {
-    console.log('   Starting Xvfb...');
-    try {
-      execSync('Xvfb :99 -screen 0 1920x1080x24 &', { timeout: 3 });
-      await new Promise(r => setTimeout(r, 2000));
-      console.log('   ✅ Xvfb started on :99');
-    } catch (err) {
-      console.log(`   ⚠️  Could not start Xvfb: ${err.message}`);
-      console.log('   Falling back to screenshot-only mode (VNC optional)');
-    }
-  }
-
-  // Setup profile directory
+  // Setup
+  ensureDisplay();
+  startVNC();
+  const vpsIP = getIP();
   fs.mkdirSync(PROFILE_DIR, { recursive: true });
+  fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
 
-  const headless = !checkDisplay(); // Headed if display available
-
-  console.log(`🚀 Launching Chromium (${headless ? 'headless' : 'headed on :99'})...`);
+  console.log(`✅ Xvfb running on :99`);
+  console.log(`✅ VNC ready at ${vpsIP}:${VNC_PORT} — password: ${VNC_PASS}`);
   console.log('');
 
+  // Launch Playwright
+  console.log('🚀 Launching Chromium...');
   const context = await chromium.launchPersistentContext(PROFILE_DIR, {
-    headless,
+    headless: false,
     args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-gpu',
-      '--start-maximized',
+      '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
+      '--disable-gpu', '--start-maximized',
       '--password-store=basic',
-      '--disable-features=ChromeWhatsNewUI',
+      '--disable-blink-features=AutomationControlled',
+      '--enable-features=WebAuthenticationHybridClient,WebAuthenticationAllowHybridClient',
     ],
     viewport: { width: 1280, height: 900 },
     ignoreDefaultArgs: ['--enable-automation'],
   });
 
-  const page = await context.newPage();
+  const page = await context.pages()[0] || await context.newPage();
+  await page.addInitScript(() => { navigator.webdriver = false; });
 
-  // Navigate to login
+  // Open login page
   console.log('🌐 Opening https://runway.edel.finance/login ...');
-  console.log('');
-  console.log('============================================');
-  console.log('     👆 STEP 1: ENTER YOUR EMAIL');
-  console.log('============================================');
-  console.log('');
-
   await page.goto('https://runway.edel.finance/login', {
-    waitUntil: 'networkidle',
-    timeout: 30000,
+    waitUntil: 'networkidle', timeout: 30000,
   });
+  await page.waitForTimeout(2000);
 
-  // Let the user type email
   const email = await ask('📧 Masukin email lo: ');
-  if (!email) {
-    console.log('❌ Email kosong. Exiting.');
-    await context.close();
-    process.exit(1);
-  }
+  if (!email) { console.log('❌'); await context.close(); process.exit(1); }
 
-  // Fill email and submit
-  await page.fill('input[type="email"], input#email, input[name="email"]', email);
-  await new Promise(r => setTimeout(r, 500));
+  await page.fill('input[type="email"]', email);
+  await page.waitForTimeout(300);
+  await page.locator('button').filter({ hasText: /passkey/i }).first().click();
+  await page.waitForTimeout(3000);
 
-  // Click "Sign In With Passkey" button
-  const passkeyBtn = await page.$('button:has-text("Passkey"), button:has-text("Sign In")');
-  if (passkeyBtn) {
-    await passkeyBtn.click();
+  // Check for "Entering Desk" button
+  const enteringBtn = page.locator('button').filter({ hasText: /Entering/i });
+  if (await enteringBtn.count() > 0) {
+    console.log('✅ Challenge diterima. Klik Entering Desk...');
+    await page.screenshot({ path: path.join(SCREENSHOT_DIR, 'step1-ready.png') });
+    
+    await enteringBtn.click();
+    await page.waitForTimeout(3000);
+
+    console.log('');
+    console.log('╔══════════════════════════════════════════════════════════╗');
+    console.log('║   📱 LANGKAH TERAKHIR — SCAN QR CODE!                ║');
+    console.log('╚══════════════════════════════════════════════════════════╝');
+    console.log('');
+    console.log('   1️⃣  Buka VNC client di HP/PC lo');
+    console.log(`   2️⃣  Connect ke → ${vpsIP}:${VNC_PORT}`);
+    console.log(`   3️⃣  Password → ${VNC_PASS}`);
+    console.log('   4️⃣  Lo bakal liat Chrome dengan QR code passkey');
+    console.log('   5️⃣  SCAN QR CODE PAKE HP LO');
+    console.log('');
+    console.log('   🔑 VNC client recommendations:');
+    console.log('      - HP: RealVNC, bVNC, VNC Viewer (Android/iOS)');
+    console.log('      - PC: TightVNC, RealVNC, TigerVNC');
+    console.log('');
+    console.log('⏳ Nunggu login (max 3 menit)...');
+
+    // Take screenshots periodically
+    for (let i = 0; i < 6; i++) {
+      await page.screenshot({ path: path.join(SCREENSHOT_DIR, `login-progress-${i+1}.png`) });
+      await new Promise(r => setTimeout(r, 5000));
+    }
   } else {
-    // Try pressing Enter
-    await page.keyboard.press('Enter');
+    console.log('⚠️  Entering Desk gak muncul. Screenshot:');
+    await page.screenshot({ path: path.join(SCREENSHOT_DIR, 'step1-error.png') });
   }
 
-  console.log('');
-  console.log('⏳ Waiting for passkey QR code...');
-  await new Promise(r => setTimeout(r, 3000));
-
-  // Check what happened - QR code should appear
-  const currentUrl = page.url();
-  console.log(`📍 URL: ${currentUrl}`);
-
-  // Try to detect if we're in a passkey flow
-  // The passkey might show a QR code or native prompt
-  const screenshotDir = path.join(ROOT, 'screenshots');
-  fs.mkdirSync(screenshotDir, { recursive: true });
-
-  // Take screenshot
-  const screenshotPath = path.join(screenshotDir, 'login-qr.png');
-  await page.screenshot({ path: screenshotPath, fullPage: true });
-  console.log(`📸 Screenshot saved: ${screenshotPath}`);
-
-  console.log('');
-  console.log('============================================');
-  console.log('     📱 STEP 2: CHECK THE SCREENSHOT');
-  console.log('============================================');
-  console.log('');
-  console.log(`   Screenshot at: ${screenshotPath}`);
-
-  if (hasDisplay) {
-    console.log('');
-    console.log('   🖥️  Display :99 is active! Browser should be visible.');
-    console.log('   If you\'re on the VPS desktop or VNC, you can see the browser.');
-    console.log('');
-    console.log('   To VNC into the VPS:');
-    console.log(`     1. Install VNC client (TightVNC, RealVNC, etc.)`);
-    console.log('     2. Connect to: YOUR_VPS_IP:5900');
-    console.log('     3. Password: edelbot');
-    console.log('');
-    console.log('   OR use x11vnc already ready:');
-    console.log('     ssh -L 5900:localhost:5900 azureuser@vps-ip');
-    console.log('     x11vnc -display :99 -forever -passwd edelbot &');
-  }
-
-  // Wait for user interaction: wait for URL to change to listing-calls
-  // or for the login to complete (max 5 minutes)
-  console.log('');
-  console.log('⏳ Waiting for login completion (scan QR from phone)...');
-  console.log('   (Max wait: 5 minutes)');
-
+  // Check login status
   let loggedIn = false;
   try {
-    await page.waitForURL('**/listing-calls*', { timeout: 300000 });
+    await page.waitForURL('**/listing-calls*', { timeout: 120000 });
     loggedIn = true;
   } catch {
-    // Check current URL
-    const finalUrl = page.url();
-    if (!finalUrl.includes('/login') && !finalUrl.includes('/register')) {
-      loggedIn = true;
-    }
+    loggedIn = !page.url().includes('/login');
   }
 
   if (loggedIn) {
-    console.log('✅ LOGIN DETECTED!');
+    console.log('✅ LOGIN SUKSES!');
   } else {
-    console.log('⚠️  Login not detected automatically. Checking cookies...');
+    console.log('⏳ Belum login, cek cookies...');
   }
 
   // Extract cookies
@@ -192,50 +198,31 @@ async function main() {
   if (edelCookie) {
     console.log('');
     console.log('✅ edel_session COOKIE FOUND!');
-    console.log(`   Token: ${edelCookie.value.substring(0, 40)}...`);
-    console.log(`   Expires: ${new Date(edelCookie.expires * 1000).toLocaleString()}`);
-
-    // Save to bot session
     const state = {
       cookies: [{
-        name: 'edel_session',
-        value: edelCookie.value,
-        domain: 'runway.edel.finance',
-        path: '/',
+        name: 'edel_session', value: edelCookie.value,
+        domain: 'runway.edel.finance', path: '/',
         expires: Date.now() / 1000 + 86400 * 30,
-        httpOnly: false,
-        secure: true,
-        sameSite: 'Lax',
+        httpOnly: false, secure: true, sameSite: 'Lax',
       }],
       origins: [{ origin: 'https://runway.edel.finance', localStorage: [] }],
     };
-
     const sessionDir = path.join(ROOT, 'sessions');
     fs.mkdirSync(sessionDir, { recursive: true });
     fs.writeFileSync(path.join(sessionDir, 'state.json'), JSON.stringify(state, null, 2));
-    console.log('');
     console.log('✅ Bot session state.json updated!');
-    console.log('   Bot is ready to run.');
-    console.log('');
-    console.log('▶️  Start the bot:');
-    console.log('   pm2 start ecosystem.config.cjs');
-    console.log('   or: npm run start');
   } else {
-    console.log('');
-    console.log('❌ No edel_session cookie found.');
-    console.log('   The passkey QR may not have been scanned.');
-    console.log('   Try again and make sure to scan the QR from your phone.');
+    console.log('❌ Belum ada edel_session.');
+    console.log('   Screenshot di:', SCREENSHOT_DIR);
+    console.log('   VNC ke VPS buat liat langsung browser.');
   }
 
-  console.log('');
-  console.log('⏳ Closing browser in 5 seconds...');
-  await new Promise(r => setTimeout(r, 5000));
+  await page.waitForTimeout(3000);
   await context.close();
-
-  console.log('✅ Done!');
+  console.log('✅ Selesai!');
 }
 
 main().catch(err => {
-  console.error('❌ Error:', err.message);
+  console.error('❌ Fatal:', err.message);
   process.exit(1);
 });
