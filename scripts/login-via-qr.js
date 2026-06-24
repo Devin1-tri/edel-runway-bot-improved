@@ -5,7 +5,7 @@
  * 🔥 CARA PAKAI:
  *
  * Step 1 — Di TERMINAL 1 (VPS):
- *   node scripts/login-via-qr.js
+ *   node scripts/login-via-qr.js <email>
  *   → Masukin email
  *   → Browser nyala di Xvfb
  *   → Klik "Sign In With Passkey" → "Entering Desk"
@@ -132,8 +132,13 @@ async function main() {
   });
   await page.waitForTimeout(2000);
 
-  const email = await ask('📧 Masukin email lo: ');
-  if (!email) { console.log('❌'); await context.close(); process.exit(1); }
+  const email = process.argv[2];
+  if (!email) {
+    console.log('❌ Gunakan: node scripts/login-via-qr.js <email> <email>');
+    console.log('   Contoh: node scripts/login-via-qr.js <email> rizvan@example.com');
+    await context.close();
+    process.exit(1);
+  }
 
   await page.fill('input[type="email"]', email);
   await page.waitForTimeout(300);
