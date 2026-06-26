@@ -5,10 +5,11 @@
   "main": "src/index.js",
   "type": "module",
   "scripts": {
-    "import": "node src/index.js import",
-    "vote": "node src/index.js vote",
-    "start": "node src/index.js start",
-    "status": "node src/index.js status"
+    "start": "node start.js",
+    "vote": "node vote.js",
+    "status": "node status.js",
+    "import": "node import-session.js",
+    "clear": "node clear-session.js"
   },
   "keywords": [
     "edel",
