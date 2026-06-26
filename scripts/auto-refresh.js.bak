@@ -81,7 +81,7 @@ async function main() {
   await cdp.send('WebAuthn.enable');
   
   // Get credentials already stored in the profile
-  let credsResponse; try { credsResponse = await cdp.send("WebAuthn.getCredentials"); } catch(e) { credsResponse = {credentials: null}; log("getCredentials not supported, proceeding anyway"); }
+  const credsResponse = await cdp.send('WebAuthn.getCredentials');
   log(`🔑 Stored credentials found: ${credsResponse.credentials?.length || 0}`);
 
   if (!credsResponse.credentials || credsResponse.credentials.length === 0) {

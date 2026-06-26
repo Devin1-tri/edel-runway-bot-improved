@@ -115,7 +115,15 @@ export async function getAssets() {
  * GET /listing-rounds/current
  */
 export async function getCurrentRound() {
-  return apiGet('/listing-rounds/current');
+  try {
+    return await apiGet('/listing-rounds/current');
+  } catch (err) {
+    if (err.message.includes('404')) {
+      logger.debug('No active listing round (404)');
+      return { status: null, fixtures: [], actions: {} };
+    }
+    throw err;
+  }
 }
 
 /**
@@ -164,7 +172,12 @@ export async function checkSession() {
     return true;
   } catch (err) {
     if (err.message.includes('SESSION_EXPIRED')) return false;
-    // Other errors (network, etc.) - still might be valid
+    // 404 from /listing-rounds/current = no active round, not expired
+    if (err.message.includes('404')) {
+      logger.debug('Session check: 404 (no active round) — session still valid');
+      return true;
+    }
+    // Other errors (network, etc.)
     logger.debug(`Session check error: ${err.message}`);
     return false;
   }

@@ -215,22 +215,33 @@ export async function performVote() {
       const startAction = parsed.actions?.startRound;
       if (startAction?.enabled !== false) {
         logger.info('🚀 No active round. Starting new one...');
-        const startResult = await startRound();
-        logger.debug(`🔍 Start result: ${JSON.stringify(startResult).substring(0, 500)}`);
-        const newParsed = parseRoundData(startResult);
-        logger.info(`✅ New round: ${formatStatus(newParsed?.status)}`);
+        try {
+          const startResult = await startRound();
+          logger.debug(`🔍 Start result: ${JSON.stringify(startResult).substring(0, 500)}`);
+          const newParsed = parseRoundData(startResult);
+          logger.info(`✅ New round: ${formatStatus(newParsed?.status)}`);
 
-        if (newParsed?.status === 'LOCKED') {
-          return doVoting(newParsed, strategy);
+          if (newParsed?.status === 'LOCKED') {
+            return doVoting(newParsed, strategy);
+          }
+
+          return {
+            success: true,
+            details: {
+              asset: 'N/A', strategy, round: newParsed?.roundId,
+              note: `Round started (${formatStatus(newParsed?.status)}). Will vote when calls open.`,
+            },
+          };
+        } catch (startErr) {
+          if (startErr.message.includes('404')) {
+            logger.info('⏳ Cannot start round — start not yet available.');
+            return {
+              success: true,
+              details: { asset: 'N/A', strategy, round: 'N/A', note: 'No round available and start not yet ready. Will retry later.' },
+            };
+          }
+          throw startErr;
         }
-
-        return {
-          success: true,
-          details: {
-            asset: 'N/A', strategy, round: newParsed?.roundId,
-            note: `Round started (${formatStatus(newParsed?.status)}). Will vote when calls open.`,
-          },
-        };
       }
 
       logger.info('⏳ No round and cannot start one.');
